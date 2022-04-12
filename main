@@ -1,0 +1,156 @@
+from scapy.all import *
+import re
+import sys
+import base64
+import requests
+import os
+import subprocess
+from subprocess import PIPE, run
+import datetime
+from subprocess import check_output
+from selenium import webdriver
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from urllib.parse import urlparse
+
+FALSE_RESPONSE = [403, 404]
+NORMAL_TLD_START = ["com", "net", "org", "int", "edu", "gov", "co"]
+NORMAL_TLD_END = ["il", "uk"]
+SUSPECT_CHARS = ["?", "$", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+WHOIS_PATH = "" # your local whois  path
+CHROMEDRIVER_PATH = "" # your local chrome-driver path
+  
+def meaningless_url(link):
+    if "-" in link:
+        return 1
+    for c in SUSPECT_CHARS:
+        if c in link and "=" not in link:
+            return 2
+    return 0
+
+
+def get_domain(link):
+    print(link)
+    parsed_url = urlparse(link)
+    return parsed_url.hostname + "/"
+
+
+def get_scheme_authority(url):
+    domain = get_domain(url)
+    if url.startswith("https"):
+        scheme_authority= "https://" + domain
+    else:
+        scheme_authority= "http://" + domain
+    return scheme_authority
+
+
+def check_robots_txt(scheme_authority):
+    scheme_authority += "robots.txt"
+    try:
+        response = requests.get(scheme_authority, verify=False)
+        code_response = response.status_code
+        if code_response in FALSE_RESPONSE:
+            return 2
+        return 0
+    except requests.exceptions.ConnectionError:
+        return 1
+    except:
+        return 3
+
+
+def check_ssl_certificate(scheme_authority):
+    try:
+        requests.get(scheme_authority)
+        return 0
+    except requests.exceptions.SSLError:
+        return 3
+    except requests.exceptions.ConnectionError:
+        return 2
+
+
+def tld(url): 
+    tld_start = url.split("//")[1].split(".")[-2]
+    tld_end = url.split(".")[-1][:-1]
+    for start in NORMAL_TLD_START:
+        if tld_start == start:
+            for end in NORMAL_TLD_END:
+                if tld_end == end:
+                    return 0
+            return 3
+    for end in NORMAL_TLD_START:
+        if tld_end == end:
+            return 0
+    return 3
+
+
+def whois(url):
+    try:
+        s = subprocess.Popen([WHOIS_PATH, url[:-1]],  stdout=PIPE, stderr=PIPE)
+        out, err = s.communicate()
+        s.wait()
+        y = str(out).split("Creation Date: ")[1][:4]
+        d = str(out).split("Creation Date: ")[1][5:7]
+        m = str(out).split("Creation Date: ")[1][8:10]
+        creation = datetime.date(int(y), int(d), int(m))
+        today = datetime.date.today()
+        delta = int(str(today - creation)[:4])
+        if delta > 1000:
+            return 0
+        return 3
+    except IndexError:
+        return 3
+    except:
+        return 2
+
+
+def speed_and_secure(url_to_check):
+    url = "https://testmysite.io/"
+    path = CHROMEDRIVER_PATH
+
+    driver = webdriver.Chrome(path)
+    driver.get(url)
+    search = driver.find_element(by=By.CLASS_NAME, value="search__input")
+    search.clear()
+    search.send_keys(url_to_check)
+    search.send_keys(Keys.RETURN)
+    main_code = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CLASS_NAME, "is-value")))
+    print(main_code.text)
+    driver.quit()
+    driver.close()
+    if main_code>85:
+        return 0
+    elif main_code>75:
+        return 1
+    return 2
+
+
+def total_grade(link):
+    scheme_authority = get_scheme_authority(link)
+    r = check_robots_txt(scheme_authority)
+    print("ROBOTS.TXT: " + str(r))
+    c = check_ssl_certificate(scheme_authority)
+    print("SSL: " + str(c))
+    w = whois(scheme_authority)
+    print("WHOIS: " + str(w))
+    t = tld(scheme_authority)
+    print("TLD: " + str(t))
+    m = meaningless_url(scheme_authority)
+    print("URL: " + str(m))
+    s_s = speed_and_secure("https://mail.google.com")
+    print("SPEED AND SECURE: " + str(s_s))
+
+    sum = r + c + w + t + m +s_s
+    return "Total grade is: " + str(sum)
+
+
+def main():
+    suspicious_link="" # the link you want to test
+    print(total_grade(suspicious_link))
+
+    
+if __name__ == '__main__':
+    main()
+    
+    
